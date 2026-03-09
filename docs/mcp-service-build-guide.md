@@ -29,12 +29,9 @@ Each MCP service lives in its own repo (`DigiBugCat/cassandra-<name>`) and is a 
 cassandra-<service>/
 ├── worker/                  # CF Worker (MCP gateway)
 │   ├── src/
-│   │   ├── index.ts         # McpAgent class + OAuthProvider export
-│   │   ├── backend.ts       # Backend HTTP client helpers
-│   │   ├── utils.ts         # WorkOS auth helpers + Props type
-│   │   ├── workos-handler.ts    # /authorize + /callback routes (Hono)
-│   │   └── workers-oauth-utils.ts  # CSRF, state, session binding (copy as-is)
-│   ├── worker-configuration.d.ts   # Env type declaration
+│   │   ├── index.ts         # createMcpWorker() + tool registration
+│   │   └── <service>.ts     # Service-specific logic (API clients, etc.)
+│   ├── worker-configuration.d.ts   # Env type declaration (extends McpAuthEnv)
 │   ├── wrangler.jsonc               # Real config (git-ignored)
 │   ├── wrangler.jsonc.example       # Template with placeholders
 │   ├── package.json
@@ -69,80 +66,81 @@ git submodule add https://github.com/DigiBugCat/cassandra-<service>.git
 
 ### 2. Worker (MCP Gateway)
 
-Copy `cassandra-yt-mcp/worker/` as your starting point. The files you need to modify vs copy as-is:
+Use the `cassandra-mcp-auth` shared package (`github:DigiBugCat/cassandra-mcp-auth`). This provides WorkOS OAuth, MCP API key resolution (with per-key credentials), and metrics middleware via a single `createMcpWorker()` factory.
 
-| File | Action |
-|------|--------|
-| `src/index.ts` | **Modify** — rename class, register your tools |
-| `src/backend.ts` | **Modify** — adjust if your backend API differs |
-| `src/utils.ts` | **Copy as-is** — WorkOS auth helpers are generic |
-| `src/workos-handler.ts` | **Copy as-is** — OAuth flow is identical |
-| `src/workers-oauth-utils.ts` | **Copy as-is** — CSRF/state utilities |
-| `worker-configuration.d.ts` | **Modify** — update Env bindings for your service |
-| `wrangler.jsonc.example` | **Modify** — update name, class, route |
-| `package.json` | **Modify** — update name |
-| `tsconfig.json` | **Copy as-is** |
+**No more copying auth boilerplate.** Your worker only needs:
+
+| File | Purpose |
+|------|---------|
+| `src/index.ts` | `createMcpWorker()` call + tool registration |
+| `src/<service>.ts` | Service-specific logic (API clients, helpers) |
+| `worker-configuration.d.ts` | Env type declaration (extend `McpAuthEnv`) |
+| `wrangler.jsonc.example` | Template with placeholders |
+| `package.json` | Dependencies |
+| `tsconfig.json` | TypeScript config |
 
 #### index.ts — Key Patterns
 
 ```typescript
-import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpAgent } from "agents/mcp";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createMcpWorker, type McpAuthEnv } from "cassandra-mcp-auth";
 import { z } from "zod";
-import { WorkOSHandler } from "./workos-handler";
-import type { Props } from "./utils";
 
-// 1. Extend McpAgent with your class name
-export class MyServiceMCP extends McpAgent<Env, Record<string, never>, Props> {
-  server: any = new McpServer({
-    name: "My Service MCP",
-    version: "1.0.0",
-  });
+// 1. Extend McpAuthEnv with service-specific bindings (if any)
+interface Env extends McpAuthEnv {
+  BACKEND_BASE_URL: string;
+  BACKEND_API_TOKEN?: string;
+}
 
-  // 2. Register tools in init()
-  async init() {
-    const env = this.env;
+// 2. createMcpWorker wires up OAuthProvider, WorkOS, MCP API key auth, and metrics
+const { default: worker, McpAgentClass } = createMcpWorker<Env>({
+  serviceId: "my-service",          // must match portal MCP_SERVICES entry
+  name: "My MCP Service",
+  registerTools(server, env, auth) {
+    // auth.credentials has per-key credentials (if service uses them)
 
-    this.server.registerTool(
+    server.registerTool(
       "tool_name",
       {
         description: "What this tool does.",
-        annotations: { readOnlyHint: true },  // or false for mutations
+        annotations: { readOnlyHint: true },
         inputSchema: {
           param: z.string().describe("Parameter description"),
         },
       },
       async ({ param }: { param: string }) => {
         // Call backend or external API
+        const result = { ok: true };
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result) }],
         };
       },
     );
-  }
-}
+  },
+});
 
-// 3. resolveExternalToken — validates WorkOS JWTs for M2M/bearer access
-async function resolveExternalToken(input: {
-  token: string;
-  request: Request;
-  env: Env;
-}): Promise<{ props: Props } | null> {
-  // JWT validation logic (copy from yt-mcp)
-}
+// 3. Export the DO class (name must match wrangler.jsonc class_name + migrations)
+export { McpAgentClass as MyServiceMCP };
+export default worker;
+```
 
-// 4. Default export is the OAuthProvider wrapper
-export default new OAuthProvider({
-  apiHandler: MyServiceMCP.serve("/mcp"),
-  apiRoute: "/mcp",
-  authorizeEndpoint: "/authorize",
-  clientRegistrationEndpoint: "/register",
-  defaultHandler: WorkOSHandler as any,
-  tokenEndpoint: "/token",
-  resolveExternalToken,
+#### Per-Key Credentials
+
+Services that need per-user configuration (e.g. Pushover user key, external API tokens) use **per-key credentials**. When creating an MCP key in the portal, the user provides service-specific credentials that are stored in the key metadata and available as `auth.credentials` in `registerTools`:
+
+```typescript
+const { default: worker, McpAgentClass } = createMcpWorker({
+  serviceId: "pushover",
+  name: "Cassandra Pushover",
+  registerTools(server, env, auth) {
+    // auth.credentials.pushover_user_key, auth.credentials.pushover_api_token
+    server.registerTool("send_notification", { ... },
+      async (args) => sendNotification(auth.credentials!, args)
+    );
+  },
 });
 ```
+
+To enable per-key credentials, register a `credentialsSchema` on the service in the portal's `MCP_SERVICES` array (see `cassandra-portal/src/mcp-keys.ts`). The portal UI dynamically renders credential input fields at key creation time.
 
 #### Critical wrangler.jsonc Rules
 
@@ -178,10 +176,7 @@ export default new OAuthProvider({
 ```json
 {
   "dependencies": {
-    "@cloudflare/workers-oauth-provider": "^0.3.0",
-    "@modelcontextprotocol/sdk": "^1.19.0",
-    "agents": "^0.7.5",
-    "hono": "^4.12.5",
+    "cassandra-mcp-auth": "github:DigiBugCat/cassandra-mcp-auth",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -191,6 +186,8 @@ export default new OAuthProvider({
   }
 }
 ```
+
+`cassandra-mcp-auth` transitively brings in `@cloudflare/workers-oauth-provider`, `agents`, `@modelcontextprotocol/sdk`, `cassandra-observability`, and `hono`. Services that need a backend proxy or other direct dependencies add them alongside.
 
 ### 3. Backend (if needed)
 

@@ -26,3 +26,6 @@
 	path = claude-agent-runner
 	url = https://github.com/DigiBugCat/claude-agent-runner.git
 	branch = main
+[submodule "cassandra-mcp-auth"]
+	path = cassandra-mcp-auth
+	url = https://github.com/DigiBugCat/cassandra-mcp-auth.git
