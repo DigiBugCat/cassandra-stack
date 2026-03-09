@@ -94,3 +94,4 @@ cd cassandra-stack
 ## Docs
 
 - [MCP Service Build Guide](docs/mcp-service-build-guide.md) — full reference for adding new MCP services
+- [Repo Testing Plans](docs/plan/testing/README.md) — per-repo notes on what to test, validate, or skip

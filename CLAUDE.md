@@ -6,9 +6,9 @@
 - **No PII or infra identifiers in tracked files**: Domains, email addresses, email domains, IDP IDs, CF Access IDs, KV namespace IDs, and any other environment-specific identifiers MUST come from tfvars or environment variables — never hardcoded in `.tf` files, worker scripts, or READMEs. Use generic placeholders in descriptions. `wrangler.jsonc` files with real IDs MUST be gitignored — only `wrangler.jsonc.example` (with placeholders) is tracked. Real values for context live in `.claude/rules/` (gitignored) and `env/` (gitignored).
 
 ## Deployment Philosophy
-- **CI/CD is for images and ArgoCD only**: GitHub Actions build/push Docker images, ArgoCD Image Updater detects new tags and syncs deployments automatically. That's the full pipeline.
+- **CI/CD is for images, ArgoCD, and Workers**: GitHub Actions build/push Docker images, ArgoCD Image Updater detects new tags and syncs deployments automatically. CF Workers auto-deploy on push to main via `wrangler deploy` in GitHub Actions.
 - **Terraform is manual**: `cassandra-infra` resources (CF tunnels, DNS, Workers, Access policies) are applied locally with `terraform apply`. No plan/apply pipelines.
-- **Wrangler deploys are manual**: CF Workers are deployed with `npx wrangler deploy` from the local machine. No CI for Worker deploys.
+- **Worker CD pattern**: Each Worker repo has a `deploy.yml` (or `deploy-worker.yml`) workflow triggered on push to main. `wrangler.jsonc` is templated at deploy time from GitHub Actions secrets (KV IDs, route patterns) — never committed. Shared scoped `CLOUDFLARE_API_TOKEN` (Account: Workers Scripts:Edit + Workers KV Storage:Edit, Zone: Workers Routes:Edit + Zone:Read + DNS:Read) + `CLOUDFLARE_ACCOUNT_ID` across all Worker repos.
 - **ArgoCD handles k8s deploys**: Helm charts in `cassandra-k8s`, ArgoCD watches the repo. Don't build custom deploy scripts or CI steps for k8s resources.
 - **Docker images are linux/amd64 only**.
 - **MCP servers are HTTP/SSE only**: No stdio. Config shape is `{type, url, headers}`, passed as `RUNNER_MCP_SERVERS` env var.
@@ -48,23 +48,26 @@ The portal UI will show it in the service nav and allow key creation scoped to i
 
 ### New service checklist:
 1. Copy `worker/` from `cassandra-yt-mcp` as template
-2. Update `wrangler.jsonc`: name, class name in migrations + bindings, route pattern
+2. Update `wrangler.jsonc.example`: name, class name in migrations + bindings, route pattern (placeholders only)
 3. Keep binding names as `MCP_OBJECT`, `OAUTH_KV`, `MCP_KEYS` (DO NOT change)
 4. Add `MCP_KEYS` KV binding with the shared namespace ID (from `tofu output mcp_keys_kv_namespace_id` in portal env)
 5. Add `mcp_` key check in `resolveExternalToken` with `meta.service === "your-service-id"`
 6. Register the service in `cassandra-portal/src/mcp-keys.ts` → `MCP_SERVICES`
 7. Create infra modules in your repo's `infra/modules/` directory (follow `cassandra-yt-mcp` pattern)
 8. Add environment in `cassandra-infra/environments/production/<service>/` sourcing module from GitHub
-9. `tofu apply` → get OAUTH_KV namespace ID → update `wrangler.jsonc`
+9. `tofu apply` → get OAUTH_KV namespace ID
 10. Set wrangler secrets (WORKOS_CLIENT_ID, WORKOS_CLIENT_SECRET, COOKIE_ENCRYPTION_KEY, + service-specific)
 11. Add redirect URI in WorkOS dashboard
-12. `npx wrangler deploy`
+12. Add `deploy.yml` workflow (copy from `cassandra-portal/.github/workflows/deploy.yml`), template `wrangler.jsonc` from GitHub Actions secrets
+13. Set GitHub Actions secrets on the repo: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (shared), plus service-specific KV IDs and route pattern/zone
+14. Store all secret values in `cassandra-stack/env/github-actions.env` and update `scripts/secrets-registry.yaml`
+15. Push to main — workflow deploys automatically
 
 ### Secrets pattern:
 - **k8s secrets**: `kubectl create secret generic` — never in git
 - **Worker secrets**: `wrangler secret put` — never in git
 - **Raw values**: stored in `cassandra-stack/env/` (gitignored)
-- **Registry**: `env/secrets-registry.yaml` — inventory of all secrets per service (source file, namespace, key mappings)
+- **Registry**: `scripts/secrets-registry.yaml` — inventory of all secrets per service (source file, namespace, key mappings)
 - **Sync script**: `scripts/sync-secrets.sh` — no args = list inventory, `apply [service|all]` = create/update k8s secrets, `wrangler <service>` = push Worker secrets
 - When adding new services, update the registry and add a case in the sync script
 

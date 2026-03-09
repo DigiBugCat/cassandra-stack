@@ -91,12 +91,16 @@ interface Env extends McpAuthEnv {
   BACKEND_API_TOKEN?: string;
 }
 
+interface MyServiceCredentials {
+  external_api_token: string;
+}
+
 // 2. createMcpWorker wires up OAuthProvider, WorkOS, MCP API key auth, and metrics
-const { default: worker, McpAgentClass } = createMcpWorker<Env>({
+const { default: worker, McpAgentClass } = createMcpWorker<Env, MyServiceCredentials>({
   serviceId: "my-service",          // must match portal MCP_SERVICES entry
   name: "My MCP Service",
   registerTools(server, env, auth) {
-    // auth.credentials has per-key credentials (if service uses them)
+    // auth.credentials is typed as MyServiceCredentials | undefined
 
     server.registerTool(
       "tool_name",
@@ -125,10 +129,15 @@ export default worker;
 
 #### Per-Key Credentials
 
-Services that need per-user configuration (e.g. Pushover user key, external API tokens) use **per-key credentials**. When creating an MCP key in the portal, the user provides service-specific credentials that are stored in the key metadata and available as `auth.credentials` in `registerTools`:
+Services that need per-user configuration (e.g. Pushover user key, external API tokens) use **per-key credentials**. When creating an MCP key in the portal, the user provides service-specific credentials that are stored in the key metadata and available as typed `auth.credentials` in `registerTools`:
 
 ```typescript
-const { default: worker, McpAgentClass } = createMcpWorker({
+interface PushoverCredentials {
+  pushover_user_key: string;
+  pushover_api_token: string;
+}
+
+const { default: worker, McpAgentClass } = createMcpWorker<Env, PushoverCredentials>({
   serviceId: "pushover",
   name: "Cassandra Pushover",
   registerTools(server, env, auth) {
@@ -141,6 +150,10 @@ const { default: worker, McpAgentClass } = createMcpWorker({
 ```
 
 To enable per-key credentials, register a `credentialsSchema` on the service in the portal's `MCP_SERVICES` array (see `cassandra-portal/src/mcp-keys.ts`). The portal UI dynamically renders credential input fields at key creation time.
+
+### Advanced Escape Hatches
+
+The package root intentionally centers `createMcpWorker()`. If a service needs lower-level control, use the exported `advanced` namespace rather than pulling internal files directly.
 
 #### Critical wrangler.jsonc Rules
 

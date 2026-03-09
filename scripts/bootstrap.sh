@@ -19,4 +19,4 @@ copy_env "$ENV_DIR/infra.env"    "$REPO_ROOT/cassandra-infra/environments/produc
 copy_env "$ENV_DIR/obsidian.env" "$REPO_ROOT/cassandra-obsidian/.env.local"
 
 echo ""
-echo "Done. k8s secrets in env/k8s.env are for manual kubeseal use."
+echo "Done. k8s secrets in env/k8s.env are for manual kubectl use."
