@@ -1,0 +1,25 @@
+[submodule "cassandra-infra"]
+	path = cassandra-infra
+	url = https://github.com/DigiBugCat/cassandra-infra.git
+	branch = main
+[submodule "cassandra-k8s"]
+	path = cassandra-k8s
+	url = https://github.com/DigiBugCat/cassandra-k8s.git
+	branch = main
+[submodule "cassandra-obsidian"]
+	path = cassandra-obsidian
+	url = https://github.com/DigiBugCat/cassandra-obsidian.git
+	branch = main
+[submodule "claude-agent-runner"]
+	path = claude-agent-runner
+	url = https://github.com/DigiBugCat/claude-agent-runner.git
+	branch = main
+[submodule "cassandra-yt-mcp"]
+	path = cassandra-yt-mcp
+	url = https://github.com/DigiBugCat/cassandra-yt-mcp.git
+[submodule "cassandra-portal"]
+	path = cassandra-portal
+	url = https://github.com/DigiBugCat/cassandra-portal.git
+[submodule "cassandra-observability"]
+	path = cassandra-observability
+	url = https://github.com/DigiBugCat/cassandra-observability.git
