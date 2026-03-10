@@ -6,7 +6,7 @@
 - **No PII or infra identifiers in tracked files**: Domains, email addresses, email domains, IDP IDs, CF Access IDs, KV namespace IDs, and any other environment-specific identifiers MUST come from tfvars or environment variables — never hardcoded in `.tf` files, worker scripts, or READMEs. Use generic placeholders in descriptions. `wrangler.jsonc` files with real IDs MUST be gitignored — only `wrangler.jsonc.example` (with placeholders) is tracked. Real values for context live in `.claude/rules/` (gitignored) and `env/` (gitignored).
 
 ## Deployment Philosophy
-- **CI/CD is for images, ArgoCD, and Workers**: GitHub Actions build/push Docker images, ArgoCD Image Updater detects new tags and syncs deployments automatically. CF Workers auto-deploy on push to main via `wrangler deploy` in GitHub Actions.
+- **CI/CD is for images, ArgoCD, and Workers**: GitHub Actions build/push Docker images tagged `latest`. ArgoCD syncs Helm charts that use `latest` with `pullPolicy: Always` — no Image Updater, no git-sha tags. CF Workers auto-deploy on push to main via `wrangler deploy` in GitHub Actions.
 - **Terraform is manual**: `cassandra-infra` resources (CF tunnels, DNS, Workers, Access policies) are applied locally with `terraform apply`. No plan/apply pipelines.
 - **Worker CD pattern**: Each Worker repo has a `deploy.yml` (or `deploy-worker.yml`) workflow triggered on push to main. `wrangler.jsonc` is templated at deploy time from GitHub Actions secrets (KV IDs, route patterns) — never committed. Shared scoped `CLOUDFLARE_API_TOKEN` (Account: Workers Scripts:Edit + Workers KV Storage:Edit, Zone: Workers Routes:Edit + Zone:Read + DNS:Read) + `CLOUDFLARE_ACCOUNT_ID` across all Worker repos.
 - **ArgoCD handles k8s deploys**: Helm charts in `cassandra-k8s`, ArgoCD watches the repo. Don't build custom deploy scripts or CI steps for k8s resources.
@@ -54,8 +54,8 @@ The portal UI will show it in the service nav and allow key creation scoped to i
 5. Add `mcp_` key check in `resolveExternalToken` with `meta.service === "your-service-id"`
 6. Register the service in `cassandra-portal/src/mcp-keys.ts` → `MCP_SERVICES`
 7. Create infra modules in your repo's `infra/modules/` directory (follow `cassandra-yt-mcp` pattern)
-8. Add environment in `cassandra-infra/environments/production/<service>/` sourcing module from GitHub
-9. `tofu apply` → get OAUTH_KV namespace ID
+8. Create `<service>.tf` in `cassandra-infra/` with module block (local path source) + outputs
+9. `tofu apply` in `cassandra-infra/` → get OAUTH_KV namespace ID from output
 10. Set wrangler secrets (WORKOS_CLIENT_ID, WORKOS_CLIENT_SECRET, COOKIE_ENCRYPTION_KEY, + service-specific)
 11. Add redirect URI in WorkOS dashboard
 12. Add `deploy.yml` workflow (copy from `cassandra-portal/.github/workflows/deploy.yml`), template `wrangler.jsonc` from GitHub Actions secrets
@@ -95,17 +95,17 @@ CF Worker (portal, yt-mcp, future)
 - **Metric naming**: Use `mcp_` prefix for cross-service metrics (e.g. `mcp_requests_total`), service-specific prefix for service-only metrics (e.g. `yt_mcp_jobs_total`).
 - **Labels**: Keep cardinality low. Use `service`, `status`, `path`, `operation`, `key_name`. Avoid high-cardinality labels like request IDs or full URLs.
 - **Shared utility**: `cassandra-observability/src/metrics.ts` — `pushMetrics()`, `counter()`, `gauge()`, `histogram()`.
-- **Terraform**: `cassandra-infra/environments/production/observability/` — CF Access app + service token for vm-push endpoint.
+- **Terraform**: `cassandra-infra/observability.tf` — CF Access app + service token for vm-push endpoint.
 - **Worker secrets** (via `wrangler secret put`): `VM_PUSH_URL`, `VM_PUSH_CLIENT_ID`, `VM_PUSH_CLIENT_SECRET`.
 - **Adding a dashboard**: Create `dashboards/<name>.json`, add to `dashboards/kustomization.yaml` configMapGenerator, push — ArgoCD syncs automatically.
 - **k8s backend services** (runner, yt-mcp backend) expose `/metrics` for VMAgent to scrape — they do NOT use the push path.
 
 ## Foot-guns & Gotchas
+- **CF API tokens don't hot-reload permissions**: After adding/removing permissions on a Cloudflare API token, you must **roll** the token to get a new value. The old value keeps the old permission set. Update the new value in GitHub Actions secrets + `env/github-actions.env`.
 - **Cluster-scoped Helm resources collide across envs**: ClusterRole/ClusterRoleBinding MUST have unique names per env — use `{{ .Release.Namespace }}` suffix. Otherwise last ArgoCD sync wins and the other env's SA loses permissions (403).
 - **SDK V2 session API is misleading**: Control methods (`setModel`, `setMcpServers`, `interrupt`, etc.) live on `session.query`, NOT the session object. `session` only exposes `send`, `stream`, `close`.
 - **SDK V2 createSession silently ignores mcpServers param**: The wrapper hardcodes `mcpServers:{}`. Must call `session.query.setMcpServers()` after creation.
 - **Tool deferral bites MCP**: Claude CLI defers ALL MCP tools behind `ToolSearch` by default. Set `ENABLE_TOOL_SEARCH=false` in runner child env to load tools eagerly.
-- **ArgoCD Image Updater credential format**: Use `pullsecret:ns/secret-name` (dockerconfigjson type). The `secret:ns/name#username:password` format is invalid despite appearing in some docs.
 - **NVIDIA runtime on k3s**: nvidia-ctk must target the `.toml.tmpl` template, NOT `config.toml` — k3s regenerates config.toml on restart and your changes vanish. The template must contain the FULL k3s containerd config (CNI, flannel, registry paths, etc.) — not just the NVIDIA runtime block, or flannel/CNI won't initialize and the node stays NotReady.
 - **WSL cgroups**: `.wslconfig` needs `kernelCommandLine = cgroup_no_v1=all` — hybrid v1/v2 breaks kubelet.
 - **GPU device plugin**: Uses env `CONFIG_FILE=/config/config.yaml`, NOT `--config` flag.

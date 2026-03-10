@@ -318,13 +318,6 @@ kind: Application
 metadata:
   name: cassandra-<service>
   namespace: argocd
-  annotations:
-    argocd-image-updater.argoproj.io/image-list: >-
-      backend=<registry-ip>:30500/cassandra-<service>/backend
-    argocd-image-updater.argoproj.io/backend.update-strategy: newest-build
-    argocd-image-updater.argoproj.io/write-back-method: argocd
-    argocd-image-updater.argoproj.io/backend.helm.image-name: image.repository
-    argocd-image-updater.argoproj.io/backend.helm.image-tag: image.tag
 spec:
   source:
     repoURL: https://github.com/DigiBugCat/cassandra-k8s.git
@@ -337,6 +330,8 @@ spec:
     automated: { prune: true, selfHeal: true }
     syncOptions: [CreateNamespace=true]
 ```
+
+**Note:** No Image Updater annotations — all images use `:latest` with `pullPolicy: Always`. CI pushes both `:latest` and sha tags. Use sha tags for debugging, then revert to `:latest`.
 
 **ARC runner** (`arc-runner-scale-set-<service>.yaml`):
 - Copy from yt-mcp's ARC runner definition
