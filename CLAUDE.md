@@ -113,4 +113,7 @@ CF Worker (portal, yt-mcp, future)
 - **Multiple GPU nodes**: Each needs unique WSL MAC in `.wslconfig` to avoid DHCP collision. See `.claude/rules/infra-context.md` for IPs and SSH details.
 - **WSL SSH hangs for first-run**: `wsl --install` + first `wsl` launch needs interactive terminal for user creation. Can't do it over SSH.
 - **CF Access is disabled for the runner**: Auth is tenant API keys in the orchestrator, not CF Access service tokens.
+- **Woodpecker k8s backend**: Steps run sequentially in one pod — DinD detached services DON'T work (block the pipeline forever). Use **Kaniko** (`gcr.io/kaniko-project/executor:debug`) for daemonless builds. Pass `--insecure` for the HTTP local registry.
+- **Woodpecker 3.x agent auth**: Agents need individual tokens (not shared secrets). Register agent via API, put the token in a manually-managed k8s secret (`woodpecker-agent-secret`), reference via `extraSecretNamesForEnvFrom`. The Helm-generated default secret has a different value.
+- **Woodpecker k8s backend RWX**: `WOODPECKER_BACKEND_K8S_STORAGE_RWX` must be `"false"` — `local-path` provisioner only supports RWO.
 - **Vault sync stale lock**: `ob sync --continuous` can exit code 1 — remove `.sync.lock/` before restarting.
