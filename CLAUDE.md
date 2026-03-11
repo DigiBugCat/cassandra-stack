@@ -60,16 +60,15 @@ The portal UI will show it in the service nav and allow key creation scoped to i
 11. Add redirect URI in WorkOS dashboard
 12. Add `.woodpecker.yaml` pipeline (copy from `cassandra-portal/.woodpecker.yaml`), template `wrangler.jsonc` from Woodpecker secrets
 13. Add Woodpecker secrets on the repo: org-level `cloudflare_api_token`/`cloudflare_account_id` (shared), plus repo-level service-specific KV IDs and route pattern/zone
-14. Store all secret values in `cassandra-stack/env/github-actions.env` and update `scripts/secrets-registry.yaml`
+14. Store all secret values in `cassandra-stack/env/github-actions.env` and update `env/secrets-registry.yaml`
 15. Push to main — Woodpecker pipeline deploys automatically
 
 ### Secrets pattern:
 - **k8s secrets**: `kubectl create secret generic` — never in git
 - **Worker secrets**: `wrangler secret put` — never in git
 - **Raw values**: stored in `cassandra-stack/env/` (gitignored)
-- **Registry**: `scripts/secrets-registry.yaml` — inventory of all secrets per service (source file, namespace, key mappings)
-- **Sync script**: `scripts/sync-secrets.sh` — no args = list inventory, `apply [service|all]` = create/update k8s secrets, `wrangler <service>` = push Worker secrets
-- When adding new services, update the registry and add a case in the sync script
+- **Registry**: `env/secrets-registry.yaml` — inventory of all secrets per service (source file, namespace, key mappings)
+- When adding new services, update the registry
 
 ## Observability
 
