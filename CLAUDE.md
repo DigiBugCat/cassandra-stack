@@ -2,13 +2,13 @@
 
 ## Conventions & Preferences
 - **Always use latest stable versions** for all pinned images, chart versions, and dependencies. Check latest before adding any new reference.
-- **ARC runners for Docker CI, `ubuntu-latest` for lightweight CI**: Repos that build Docker images use self-hosted ARC runners. Repos with only type-checks (e.g. `cassandra-portal`) use `ubuntu-latest`.
+- **Woodpecker CI for all pipelines**: All CI/CD runs on self-hosted Woodpecker CI (`ci.cassandrasedge.com`) on the k3s cluster. Pipeline pods spawned via Kubernetes backend. No GitHub Actions, no ARC runners.
 - **No PII or infra identifiers in tracked files**: Domains, email addresses, email domains, IDP IDs, CF Access IDs, KV namespace IDs, and any other environment-specific identifiers MUST come from tfvars or environment variables — never hardcoded in `.tf` files, worker scripts, or READMEs. Use generic placeholders in descriptions. `wrangler.jsonc` files with real IDs MUST be gitignored — only `wrangler.jsonc.example` (with placeholders) is tracked. Real values for context live in `.claude/rules/` (gitignored) and `env/` (gitignored).
 
 ## Deployment Philosophy
-- **CI/CD is for images, ArgoCD, and Workers**: GitHub Actions build/push Docker images tagged `latest`. ArgoCD syncs Helm charts that use `latest` with `pullPolicy: Always` — no Image Updater, no git-sha tags. CF Workers auto-deploy on push to main via `wrangler deploy` in GitHub Actions.
+- **CI/CD is for images, ArgoCD, and Workers**: Woodpecker CI builds/pushes Docker images tagged `latest`. ArgoCD syncs Helm charts that use `latest` with `pullPolicy: Always` — no Image Updater, no git-sha tags. CF Workers auto-deploy on push to main via `wrangler deploy` in Woodpecker pipelines.
 - **Terraform is manual**: `cassandra-infra` resources (CF tunnels, DNS, Workers, Access policies) are applied locally with `terraform apply`. No plan/apply pipelines.
-- **Worker CD pattern**: Each Worker repo has a `deploy.yml` (or `deploy-worker.yml`) workflow triggered on push to main. `wrangler.jsonc` is templated at deploy time from GitHub Actions secrets (KV IDs, route patterns) — never committed. Shared scoped `CLOUDFLARE_API_TOKEN` (Account: Workers Scripts:Edit + Workers KV Storage:Edit, Zone: Workers Routes:Edit + Zone:Read + DNS:Read) + `CLOUDFLARE_ACCOUNT_ID` across all Worker repos.
+- **Worker CD pattern**: Each Worker repo has a `.woodpecker.yaml` pipeline triggered on push to main. `wrangler.jsonc` is templated at deploy time from Woodpecker secrets (KV IDs, route patterns) — never committed. Shared `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` as org-level Woodpecker secrets.
 - **ArgoCD handles k8s deploys**: Helm charts in `cassandra-k8s`, ArgoCD watches the repo. Don't build custom deploy scripts or CI steps for k8s resources.
 - **Docker images are linux/amd64 only**.
 - **MCP servers are HTTP/SSE only**: No stdio. Config shape is `{type, url, headers}`, passed as `RUNNER_MCP_SERVERS` env var.
@@ -58,10 +58,10 @@ The portal UI will show it in the service nav and allow key creation scoped to i
 9. `tofu apply` in `cassandra-infra/` → get OAUTH_KV namespace ID from output
 10. Set wrangler secrets (WORKOS_CLIENT_ID, WORKOS_CLIENT_SECRET, COOKIE_ENCRYPTION_KEY, + service-specific)
 11. Add redirect URI in WorkOS dashboard
-12. Add `deploy.yml` workflow (copy from `cassandra-portal/.github/workflows/deploy.yml`), template `wrangler.jsonc` from GitHub Actions secrets
-13. Set GitHub Actions secrets on the repo: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (shared), plus service-specific KV IDs and route pattern/zone
+12. Add `.woodpecker.yaml` pipeline (copy from `cassandra-portal/.woodpecker.yaml`), template `wrangler.jsonc` from Woodpecker secrets
+13. Add Woodpecker secrets on the repo: org-level `cloudflare_api_token`/`cloudflare_account_id` (shared), plus repo-level service-specific KV IDs and route pattern/zone
 14. Store all secret values in `cassandra-stack/env/github-actions.env` and update `scripts/secrets-registry.yaml`
-15. Push to main — workflow deploys automatically
+15. Push to main — Woodpecker pipeline deploys automatically
 
 ### Secrets pattern:
 - **k8s secrets**: `kubectl create secret generic` — never in git
@@ -101,7 +101,7 @@ CF Worker (portal, yt-mcp, future)
 - **k8s backend services** (runner, yt-mcp backend) expose `/metrics` for VMAgent to scrape — they do NOT use the push path.
 
 ## Foot-guns & Gotchas
-- **CF API tokens don't hot-reload permissions**: After adding/removing permissions on a Cloudflare API token, you must **roll** the token to get a new value. The old value keeps the old permission set. Update the new value in GitHub Actions secrets + `env/github-actions.env`.
+- **CF API tokens don't hot-reload permissions**: After adding/removing permissions on a Cloudflare API token, you must **roll** the token to get a new value. The old value keeps the old permission set. Update the new value in Woodpecker secrets + `env/github-actions.env`.
 - **Cluster-scoped Helm resources collide across envs**: ClusterRole/ClusterRoleBinding MUST have unique names per env — use `{{ .Release.Namespace }}` suffix. Otherwise last ArgoCD sync wins and the other env's SA loses permissions (403).
 - **SDK V2 session API is misleading**: Control methods (`setModel`, `setMcpServers`, `interrupt`, etc.) live on `session.query`, NOT the session object. `session` only exposes `send`, `stream`, `close`.
 - **SDK V2 createSession silently ignores mcpServers param**: The wrapper hardcodes `mcpServers:{}`. Must call `session.query.setMcpServers()` after creation.
