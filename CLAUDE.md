@@ -16,7 +16,10 @@
 - **Portal design**: Dense layout, Sora font. Runner tokens prefixed with `cassandra/` to scope from other account tokens. MCP keys prefixed with `mcp_` and scoped per service.
 - **Orchestrator needs ClusterRole** (not Role): It creates tenant namespaces (`claude-t-{id}`) and spawns pods across them.
 - **CF tunnel proxies WebSockets fine**: If WS fails through CF but works via port-forward, the bug is client-side (race conditions, auth), not Cloudflare.
-- **k3d is local, kubectl is remote**: Don't confuse `k3d` commands (local dev cluster) with `kubectl` (remote VPS production cluster).
+- **k3d is local, kubectl is remote**: Don't confuse `k3d` commands (local dev cluster) with `kubectl` (remote k3s production cluster).
+- **Dedicated control plane**: dell-server is the k3s server (control plane only, label `role=control-plane-workloads`). Critical services (cloudflared, ArgoCD) pinned there. pantainos is an agent for heavy workloads. GPU nodes (callsonballz, will) are tainted for GPU workloads only.
+- **Cloudflared is standalone**: Separate deployment in `claude-runner` namespace pinned to dell-server — NOT a sidecar of the orchestrator. Defined in `cassandra-k8s/apps/cloudflared/`.
+- **UniFi managed via Terraform**: DHCP reservations for all k3s nodes managed by `paultyng/unifi` provider in `cassandra-infra/`. Node inventory in gitignored `production.tfvars`.
 
 ## MCP Worker Pattern (for porting new services)
 
@@ -112,6 +115,8 @@ CF Worker (portal, yt-mcp, future)
 - **k3s agent via LAN not Tailscale**: WSL can't reach Tailscale IPs directly, so GPU nodes join via LAN IP.
 - **Multiple GPU nodes**: Each needs unique WSL MAC in `.wslconfig` to avoid DHCP collision. See `.claude/rules/infra-context.md` for IPs and SSH details.
 - **WSL SSH hangs for first-run**: `wsl --install` + first `wsl` launch needs interactive terminal for user creation. Can't do it over SSH.
+- **WSL doesn't auto-start on boot**: WSL only starts when `wsl` is invoked. Both GPU nodes have a Windows scheduled task "WSL Auto-Start" (`schtasks` / `Register-ScheduledTask`) that runs `wsl -d Ubuntu-24.04 -- /bin/true` at logon. If WSL is down, SSH to the Windows host and run `wsl -d Ubuntu-24.04 -- sudo service ssh start`.
+- **dell-server sleep disabled**: GNOME removed, `multi-user.target`, sleep/suspend/hibernate masked via systemd, logind configured to ignore all lid/power/idle actions. NTP via systemd-timesyncd.
 - **CF Access is disabled for the runner**: Auth is tenant API keys in the orchestrator, not CF Access service tokens.
 - **Woodpecker k8s backend**: Steps run sequentially in one pod — DinD detached services DON'T work (block the pipeline forever). Use **Kaniko** (`gcr.io/kaniko-project/executor:debug`) for daemonless builds. Pass `--insecure` for the HTTP local registry.
 - **Woodpecker 3.x agent auth**: Agents need individual tokens (not shared secrets). Register agent via API, put the token in a manually-managed k8s secret (`woodpecker-agent-secret`), reference via `extraSecretNamesForEnvFrom`. The Helm-generated default secret has a different value.
