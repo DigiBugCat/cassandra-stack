@@ -42,8 +42,8 @@ AI agent platform — multi-session Claude Code runner with Obsidian integration
                          │                            ▲                            │
                          │  ┌──────────────┐          │                            │
                          │  │   ArgoCD      │          │  metrics push             │
-                         │  │ + Image       │          │  (CF Workers)             │
-                         │  │   Updater     │          │                            │
+                         │  │              │          │  (CF Workers)             │
+                         │  │              │          │                            │
                          │  └──────────────┘          │                            │
                          └────────────────────────────┼────────────────────────────┘
                                                       │
@@ -61,7 +61,7 @@ AI agent platform — multi-session Claude Code runner with Obsidian integration
               │  │ ArgoCD sync    │  │ ArgoCD sync        │  │                   │  │
               │  └─────────────────┘  └──────────────────┘  └───────────────────┘  │
               │                                                                     │
-              │  ARC runners (self-hosted)        ubuntu-latest (lightweight CI)    │
+              │  Woodpecker CI (self-hosted) + BuildKit (image builds)              │
               └─────────────────────────────────────────────────────────────────────┘
 
               ┌─────────────────────────────────────────────────────────────────────┐
@@ -76,10 +76,10 @@ AI agent platform — multi-session Claude Code runner with Obsidian integration
 | Repo | Description | CI/CD |
 |------|-------------|-------|
 | [cassandra-obsidian](https://github.com/DigiBugCat/cassandra-obsidian) | Obsidian plugin — chat UI, WebSocket streaming, tool rendering | — |
-| [claude-agent-runner](https://github.com/DigiBugCat/claude-agent-runner) | Multi-session agent orchestrator + Docker/k8s runner | ARC → Docker → local registry → ArgoCD |
-| [cassandra-yt-mcp](https://github.com/DigiBugCat/cassandra-yt-mcp) | YouTube MCP service — GPU transcription + CF Worker gateway | ARC → Docker → ArgoCD (backend), Wrangler CD (worker) |
-| [cassandra-portal](https://github.com/DigiBugCat/cassandra-portal) | Portal — dashboard, tenant keys, MCP API key management | Wrangler CD on push to main |
-| [cassandra-mcp-auth](https://github.com/DigiBugCat/cassandra-mcp-auth) | Shared MCP Worker auth — WorkOS OAuth, API key resolution, per-key credentials | Type-check CI |
+| [claude-agent-runner](https://github.com/DigiBugCat/claude-agent-runner) | Multi-session agent orchestrator + Docker/k8s runner | Woodpecker → BuildKit → local registry → ArgoCD |
+| [cassandra-yt-mcp](https://github.com/DigiBugCat/cassandra-yt-mcp) | YouTube MCP service — GPU transcription + CF Worker + FastMCP sidecar | Woodpecker → BuildKit → ArgoCD (backend), Wrangler CD (worker) |
+| [cassandra-portal](https://github.com/DigiBugCat/cassandra-portal) | Portal — dashboard, tenant keys, MCP API key management | Woodpecker → Wrangler CD |
+| [cassandra-auth](https://github.com/DigiBugCat/cassandra-auth) | Shared MCP auth (TS + Python) + centralized ACL service | Woodpecker → type-check + Wrangler CD |
 | [cassandra-observability](https://github.com/DigiBugCat/cassandra-observability) | Shared Worker metrics push + Grafana dashboards | Type-check CI |
 | [cassandra-k8s](https://github.com/DigiBugCat/cassandra-k8s) | Helm charts + ArgoCD GitOps | ArgoCD watches repo |
 | [cassandra-infra](https://github.com/DigiBugCat/cassandra-infra) | Terraform — Cloudflare tunnels, DNS, WAF, Access | Manual `tofu apply` |

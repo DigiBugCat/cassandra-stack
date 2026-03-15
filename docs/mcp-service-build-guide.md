@@ -4,8 +4,9 @@ Reference guide for building new MCP services in the Cassandra stack. Based on t
 
 ## Architecture Overview
 
-Every Cassandra MCP service follows a three-layer architecture:
+Two deployment patterns exist:
 
+### Pattern 1: CF Worker (existing services)
 ```
 Client (Claude, Obsidian, etc.)
   ↓ OAuth 2.1 (MCP protocol)
@@ -20,6 +21,19 @@ Backend (k8s pod)                          ← yt-mcp-api.<domain>
 **Backend** = the actual service logic. Runs in k8s, exposed via CF tunnel, protected by CF Access.
 
 For simple services with no heavy compute, the worker alone may suffice (tools can call external APIs directly).
+
+### Pattern 2: FastMCP sidecar (new services with k8s backends)
+```
+Client
+  ↓ Bearer mcp_... API key
+CF Tunnel
+  ↓
+MCP sidecar (FastMCP, port 3003)           ← yt-mcp-mcp.<domain>
+  ↓ shared volume, direct DB access
+Backend (same pod)
+```
+
+**MCP sidecar** = Python/FastMCP server running as a container in the same pod. Auth via `cassandra-mcp-auth` Python package (MCP API key validation via ACL `/keys/validate`). ACL policy baked into Docker image at build time. Reference: `cassandra-yt-mcp/backend/mcp_server.py`.
 
 ## Repo Structure
 
@@ -45,9 +59,7 @@ cassandra-<service>/
 │   └── modules/
 │       ├── worker-edge/     # KV namespace + DNS CNAME + WAF skip
 │       └── backend-access/  # CF Access app + service token + policy
-├── .github/workflows/
-│   ├── ci.yml               # Tests (ARC runner)
-│   └── deploy.yml           # Build + push Docker image (ARC runner)
+├── .woodpecker.yaml          # CI/CD pipeline (Woodpecker CI)
 └── README.md
 ```
 
@@ -66,7 +78,7 @@ git submodule add https://github.com/DigiBugCat/cassandra-<service>.git
 
 ### 2. Worker (MCP Gateway)
 
-Use the `cassandra-mcp-auth` shared package (`github:DigiBugCat/cassandra-mcp-auth`). This provides WorkOS OAuth, MCP API key resolution (with per-key credentials), and metrics middleware via a single `createMcpWorker()` factory.
+Use the `cassandra-mcp-auth` shared package (`github:DigiBugCat/cassandra-auth`). This provides WorkOS OAuth, MCP API key resolution (with per-key credentials), and metrics middleware via a single `createMcpWorker()` factory.
 
 **No more copying auth boilerplate.** Your worker only needs:
 
@@ -189,7 +201,7 @@ The package root intentionally centers `createMcpWorker()`. If a service needs l
 ```json
 {
   "dependencies": {
-    "cassandra-mcp-auth": "github:DigiBugCat/cassandra-mcp-auth",
+    "cassandra-mcp-auth": "github:DigiBugCat/cassandra-auth",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -258,33 +270,27 @@ resource "cloudflare_zero_trust_access_policy" "backend" {
 }
 ```
 
-#### Environment composition (in `cassandra-infra/`)
+#### Service composition (in `cassandra-infra/`)
 
-Create `environments/production/<service>/main.tf` that wires up:
-1. `cloudflare-tunnel` module (shared, from `cassandra-infra/modules/` via relative path)
-2. `worker-edge` module (from your repo's `infra/modules/` via GitHub URL)
-3. `backend-access` module (from your repo's `infra/modules/` via GitHub URL, if backend exists)
-
-Service-specific modules are sourced remotely from the public GitHub repo — not via relative filesystem paths. This means `cassandra-infra` doesn't need sibling submodules checked out to run `tofu init/apply`:
+`cassandra-infra` is a single root module — create `<service>.tf` in the root that composes your service's Terraform modules. Modules are sourced via local filesystem paths (cassandra-stack submodules), not GitHub URLs.
 
 ```hcl
-module "tunnel" {
-  source = "../../../modules/cloudflare-tunnel"  # shared, local
+# cassandra-infra/<service>.tf
+
+module "<service>_worker_edge" {
+  source = "../cassandra-<service>/infra/modules/worker-edge"
   # ...
 }
 
-module "worker_edge" {
-  source = "github.com/DigiBugCat/cassandra-<service>//infra/modules/worker-edge?ref=main"
-  # ...
-}
-
-module "backend_access" {
-  source = "github.com/DigiBugCat/cassandra-<service>//infra/modules/backend-access?ref=main"
+module "<service>_backend_access" {
+  source = "../cassandra-<service>/infra/modules/backend-access"
   # ...
 }
 ```
 
-Pin `?ref=main` for latest, or use a commit SHA / tag for stability. After changing a module source, run `tofu init -upgrade` to re-fetch.
+For tunnel ingress, add an entry to `extra_ingress_rules` and `extra_dns_hostnames` in `tunnel.tf` (single shared tunnel for all k8s services). Do NOT create per-service tunnels.
+
+One `tofu apply` in `cassandra-infra/` manages all services.
 
 ### 5. Helm Chart (in `cassandra-k8s/`)
 
@@ -304,7 +310,7 @@ apps/cassandra-<service>/
 
 **Key patterns:**
 - `Recreate` strategy (not `RollingUpdate`) for GPU/singleton workloads
-- Cloudflared tunnel sidecar for backend exposure
+- No per-service cloudflared sidecar — all services route through the single shared tunnel (cloudflared in `claude-runner` namespace). Add ingress rules to `cassandra-infra/tunnel.tf`.
 - Secrets via `secretKeyRef` (manual `kubectl create secret`, never in git)
 - `startupProbe` with generous timeout for GPU workloads (failureThreshold: 18, periodSeconds: 10 = 3 min)
 - Tolerations + affinity for GPU node targeting (if applicable)
@@ -331,45 +337,68 @@ spec:
     syncOptions: [CreateNamespace=true]
 ```
 
-**Note:** No Image Updater annotations — all images use `:latest` with `pullPolicy: Always`. CI pushes both `:latest` and sha tags. Use sha tags for debugging, then revert to `:latest`.
+**Note:** No Image Updater annotations — all images use `:latest` with `pullPolicy: Always`.
 
-**ARC runner** (`arc-runner-scale-set-<service>.yaml`):
-- Copy from yt-mcp's ARC runner definition
-- Update `githubConfigUrl`, `runnerScaleSetName`, and resource limits
-- Must include `--insecure-registry=<registry-ip>:30500` in DinD dockerd args
+### 7. CI/CD Pipeline (Woodpecker CI)
 
-### 7. CI/CD Workflows (in your repo's `.github/workflows/`)
+All CI/CD runs on self-hosted Woodpecker CI (`ci.cassandrasedge.com`). No GitHub Actions, no ARC runners.
 
-**`ci.yml`** — lint, type-check, test on every push/PR:
+Create `.woodpecker.yaml` in your repo root. Copy from `cassandra-portal/.woodpecker.yaml` or `cassandra-yt-mcp/.woodpecker.yaml` as template.
+
+**Key patterns:**
+
+- **Type-check step** (all branches, push + PR):
 ```yaml
-jobs:
-  backend:
-    runs-on: gh-arc-cassandra-<service>   # ARC runner name
-    steps:
-      - uses: actions/checkout@v4
-      # language-specific test steps
-  worker:
-    runs-on: gh-arc-cassandra-<service>
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-      - run: npm install && npm run type-check
+- name: type-check
+  image: node:22-slim
+  commands:
+    - cd worker
+    - npm install
+    - npm run type-check
 ```
 
-**`deploy.yml`** — build + push Docker image on main push:
+- **Docker image build** (push to main only) — uses **BuildKit** (not `docker build`):
 ```yaml
-env:
-  REGISTRY: <registry-ip>:30500
-  IMAGE_NAME: cassandra-<service>/backend
-jobs:
-  build-and-push:
-    runs-on: gh-arc-cassandra-<service>
-    steps:
-      - uses: actions/checkout@v4
-      # docker build + docker push (NOT buildx — breaks with insecure registries)
+- name: build-backend
+  image: moby/buildkit:v0.21.1
+  when:
+    - event: push
+      branch: main
+  commands:
+    - >
+      buildctl
+      --addr tcp://buildkitd.buildkitd.svc.cluster.local:1234
+      build
+      --frontend dockerfile.v0
+      --local context=backend
+      --local dockerfile=backend
+      --output type=image,name=172.20.0.161:30500/cassandra-<service>/backend:latest,push=true,registry.insecure=true
 ```
 
-**Important:** Do NOT use `docker/setup-buildx-action`. The buildx `docker-container` driver ignores DinD's `--insecure-registry` and tries HTTPS. Use the default `docker` driver.
+- **CF Worker deploy** (push to main, worker/ changed):
+```yaml
+- name: deploy-cf-worker
+  image: node:22-slim
+  when:
+    - event: push
+      branch: main
+      path:
+        include: ['worker/**']
+  environment:
+    CLOUDFLARE_API_TOKEN:
+      from_secret: cloudflare_api_token
+    CLOUDFLARE_ACCOUNT_ID:
+      from_secret: cloudflare_account_id
+    # ... KV IDs, route pattern/zone from Woodpecker secrets
+  commands:
+    - cd worker && npm install
+    - | # Template wrangler.jsonc from env vars (node -e script)
+    - npx wrangler deploy
+```
+
+**Woodpecker secrets:**
+- Org-level (shared): `cloudflare_api_token`, `cloudflare_account_id`, `mcp_keys_kv_id`
+- Repo-level: service-specific KV IDs, route patterns, zone names
 
 ### 8. Secrets
 
@@ -404,11 +433,9 @@ kubectl create secret generic cassandra-<service>-backend \
   --namespace cassandra-<service> \
   --from-literal=BACKEND_API_TOKEN=<token> \
   --from-literal=OTHER_KEY=<value>
-
-kubectl create secret generic cloudflare-tunnel \
-  --namespace cassandra-<service> \
-  --from-literal=token=<tunnel-token>
 ```
+
+Note: No per-service tunnel secret needed. All services route through the single shared tunnel (cloudflared in `claude-runner` namespace).
 
 #### Update the registry
 
@@ -678,13 +705,13 @@ Managed by:
 ### 11. Deploy Sequence
 
 ```bash
-# 1. Terraform — create CF tunnel, KV namespace, DNS, Access
-cd cassandra-infra/environments/production/<service>
-source ../../.env
-tofu init -backend-config=production.s3.tfbackend
+# 1. Terraform — create KV namespaces, DNS, Access (single root module)
+cd cassandra-infra
+source ../env/infra.env
+tofu init -backend-config=environments/production/production.s3.tfbackend
 tofu apply
 
-# 2. Get KV namespace ID from terraform output → update wrangler.jsonc
+# 2. Get KV namespace ID from terraform output → add as Woodpecker secret
 
 # 3. Set worker secrets
 cd cassandra-<service>/worker
@@ -693,25 +720,32 @@ wrangler secret put WORKOS_CLIENT_SECRET
 wrangler secret put COOKIE_ENCRYPTION_KEY
 # ... service-specific secrets
 
-# 4. Deploy worker
-npx wrangler deploy
+# 4. Add redirect URI in WorkOS dashboard
 
-# 5. Add redirect URI in WorkOS dashboard
+# 5. Add Woodpecker secrets (repo-level) for KV IDs, route pattern/zone
+#    Org-level cloudflare_api_token/cloudflare_account_id are shared
 
-# 6. Create k8s secrets
+# 6. Activate repo in Woodpecker: woodpecker-cli repo add <forge-remote-id>
+
+# 7. Create k8s secrets
 kubectl create secret generic ...
 
-# 7. Add Helm chart to cassandra-k8s/apps/
+# 8. Add Helm chart to cassandra-k8s/apps/
 #    - Include prometheus.io/scrape annotation in deployment template
-# 8. Add ArgoCD Application to cassandra-k8s/argocd/apps/
-# 9. Add ARC runner scale set to cassandra-k8s/argocd/apps/
+# 9. Add ArgoCD Application to cassandra-k8s/argocd/apps/
 # 10. Push cassandra-k8s — ArgoCD picks it up
 
-# 11. Add Grafana dashboard to cassandra-observability/dashboards/
+# 11. Add tunnel ingress rule in cassandra-infra/tunnel.tf
+#     - Add entry to extra_ingress_rules + extra_dns_hostnames
+#     - tofu apply
+
+# 12. Add Grafana dashboard to cassandra-observability/dashboards/
 #     - Add JSON file + entry in kustomization.yaml
 #     - Push cassandra-observability — ArgoCD syncs dashboards
 
-# 12. Update secrets registry + sync script in cassandra-stack
+# 13. Push service repo to main — Woodpecker pipeline deploys automatically
+
+# 14. Update secrets registry in cassandra-stack/env/secrets-registry.yaml
 ```
 
 ## Design Decisions
@@ -729,13 +763,13 @@ These are first-party services. No reason to show a consent screen to the user �
 Defense in depth. Even though the backend has its own `BACKEND_API_TOKEN`, CF Access adds a network-level gate. Only the worker's service token can reach the backend through the tunnel.
 
 ### Why do services own their own infra modules?
-Each service ships its own Terraform modules in `infra/modules/` rather than sharing centralized modules. Services may diverge over time — different auth patterns, extra resources, WAF rules. The environment compositions in `cassandra-infra` source these modules via GitHub URLs (`github.com/DigiBugCat/cassandra-<service>//infra/modules/...?ref=main`), so `cassandra-infra` doesn't depend on sibling checkouts. Only truly generic modules (like `cloudflare-tunnel`) live in `cassandra-infra/modules/`.
+Each service ships its own Terraform modules in `infra/modules/` rather than sharing centralized modules. Services may diverge over time — different auth patterns, extra resources, WAF rules. The root module in `cassandra-infra` sources these via local filesystem paths (cassandra-stack submodules). Only truly generic modules (like `cloudflare-tunnel`) live in `cassandra-infra/modules/`.
 
 ### Why local registry instead of GHCR?
 Speed. Images stay on-cluster, no egress costs, no rate limits. The tradeoff is manual insecure-registry config on all nodes.
 
-### Why not buildx?
-The `docker-container` buildx driver creates its own daemon that doesn't inherit DinD's `--insecure-registry` flag. It tries HTTPS against the HTTP-only local registry and fails. Standard `docker build` uses the DinD daemon directly and works.
+### Why BuildKit instead of docker build?
+Kaniko was archived June 2025. BuildKit runs as a persistent Deployment on pantainos with cache on `/scratch`, making source-only rebuilds near-instant. Woodpecker steps use `moby/buildkit:v0.21.1` with `buildctl --addr tcp://buildkitd.buildkitd.svc.cluster.local:1234`.
 
 ### Why Recreate instead of RollingUpdate?
 For GPU workloads and singleton services with PVCs. Can't have two pods fighting over the same GPU or volume. For stateless CPU services, `RollingUpdate` is fine.
@@ -751,8 +785,7 @@ For GPU workloads and singleton services with PVCs. Can't have two pods fighting
 | k8s namespace | `cassandra-<service>` | `cassandra-yt-mcp` |
 | Helm chart | `apps/cassandra-<service>/` | `apps/cassandra-yt-mcp/` |
 | Docker image | `cassandra-<service>/backend` | `cassandra-yt-mcp/backend` |
-| ARC runner | `gh-arc-cassandra-<service>` | `gh-arc-cassandra-yt-mcp` |
-| CF tunnel | `cassandra-<service>` | `cassandra-yt-mcp` |
+| CF tunnel ingress | `<service>-api.<domain>` | `yt-mcp-api.<domain>` |
 | KV namespace | `cassandra-<service>-oauth-state` | `cassandra-yt-mcp-oauth-state` |
 | DO class | `Cassandra<Service>MCP` | `CassandraYtMCP` |
 | Metric prefix | `<service_snake>_*` | `yt_mcp_*` |
