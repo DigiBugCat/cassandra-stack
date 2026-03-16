@@ -36,7 +36,7 @@
   ];
 
   // ── State ──────────────────────────────────────────────────
-  let messagesEl, inputField, sendBtn, statusDot, statusText, statusTokens;
+  let messagesEl, inputField, sendBtn, statusDot, statusText, statusTokens, statusVault;
   let modelBtn, modelDropdown, thinkingBtn, newChatBtn;
   let currentAssistantMsg = null;   // DOM element for current streaming assistant message
   let currentTextBlock = null;      // Current text block being appended to
@@ -55,6 +55,7 @@
     statusDot = document.getElementById('status-dot');
     statusText = document.getElementById('status-text');
     statusTokens = document.getElementById('status-tokens');
+    statusVault = document.getElementById('status-vault');
     modelBtn = document.getElementById('model-btn');
     modelDropdown = document.getElementById('model-dropdown');
     thinkingBtn = document.getElementById('thinking-btn');
@@ -95,7 +96,7 @@
     }
 
     // Expose API
-    window.cmux = { pushEvent, setTheme, clear, setStatus, setTokens, setModel, setThinking, appendUserMessage };
+    window.cmux = { pushEvent, setTheme, clear, setStatus, setTokens, setVault, setModel, setThinking, appendUserMessage };
   }
 
   function renderModelDropdown() {
@@ -207,6 +208,12 @@
     }
   }
 
+  function setVault(name) {
+    if (statusVault) {
+      statusVault.textContent = name ? ('vault: ' + name) : '';
+    }
+  }
+
   // ── Clear ──────────────────────────────────────────────────
   function clear() {
     if (messagesEl) messagesEl.innerHTML = '';
@@ -276,6 +283,19 @@
           if (!turnStartTime) turnStartTime = Date.now();
           showWaiting();
         }
+        break;
+
+      case 'error':
+        hideWaiting();
+        ensureAssistantMsg();
+        var errEl = document.createElement('div');
+        errEl.className = 'error-block';
+        errEl.textContent = event.content || 'An error occurred';
+        currentAssistantMsg.appendChild(errEl);
+        currentAssistantMsg = null;
+        currentTextBlock = null;
+        currentThinkingBlock = null;
+        setStatus('idle');
         break;
 
       case 'done':

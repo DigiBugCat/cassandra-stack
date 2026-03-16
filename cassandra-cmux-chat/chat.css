@@ -111,6 +111,14 @@ body {
 .thinking-content p { margin: 0 0 8px; }
 .thinking-content p:last-child { margin-bottom: 0; }
 
+/* ── Error block ────────────────────────── */
+.error-block {
+  margin: 8px 0; padding: 8px 12px; border-radius: 6px;
+  background: color-mix(in srgb, var(--red) 12%, var(--bg));
+  color: var(--red); font-size: 14px; line-height: 1.5;
+  border-left: 3px solid var(--red);
+}
+
 /* ── Tool calls ─────────────────────────── */
 .tool-call { margin: 8px 0; }
 .tool-header {
@@ -286,7 +294,13 @@ body {
 .status-dot.connected { background: var(--green); }
 .status-dot.disconnected { background: var(--red); }
 .status-dot.busy { background: var(--yellow); }
-.status-text { flex: 1; }
+.status-text { }
+.status-vault {
+  flex: 1;
+  color: var(--muted); font-style: italic;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.status-vault:empty { flex: 1; }
 .status-tokens { color: var(--faint); }
 
 /* ── Input ──────────────────────────────── */

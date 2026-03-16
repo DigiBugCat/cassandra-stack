@@ -69,7 +69,7 @@ The portal UI will show it in the service nav and allow key creation scoped to i
 13. Add Woodpecker secrets on the repo: org-level `cloudflare_api_token`/`cloudflare_account_id` (shared), plus repo-level service-specific KV IDs and route pattern/zone
 14. Store all secret values in `cassandra-stack/env/github-actions.env` and update `env/secrets-registry.yaml`
 15. Push to main — Woodpecker pipeline deploys automatically
-16. **ACL integration**: Set `ACL_URL` and `ACL_SECRET` wrangler secrets on the new Worker. Add ACL policy for the service in `env/acl.yaml` and redeploy the ACL worker. Per-user credentials are fetched from the ACL service automatically when `ACL_URL` is set.
+16. **ACL integration**: Set `AUTH_URL` and `AUTH_SECRET` wrangler secrets on the new Worker. Add ACL policy for the service in `env/acl.yaml` and redeploy the ACL worker. Per-user credentials are fetched from the ACL service automatically when `AUTH_URL` is set.
 
 ### Pattern 2: FastMCP sidecar (new services with k8s backends)
 
@@ -79,12 +79,12 @@ Python/FastMCP server running as a sidecar container in the same pod as the back
 1. Add `mcp_server.py`, `auth.py`, `acl.py` to your backend (copy from `cassandra-yt-mcp/backend/`)
 2. Add `cassandra-mcp-auth` Python package as dependency
 3. Add `ROLE=mcp` entrypoint in `main.py` that starts the FastMCP server
-4. Add `ACL_YAML_CONTENT` build arg to Dockerfile (bakes `acl.yaml` into image)
+4. Add `AUTH_YAML_CONTENT` build arg to Dockerfile (bakes `acl.yaml` into image)
 5. Add MCP sidecar container to Helm chart (port 3003, `ROLE=mcp`)
 6. Add MCP service port to k8s Service
-7. Create k8s secret with `ACL_URL` and `ACL_SECRET`
+7. Create k8s secret with `AUTH_URL` and `AUTH_SECRET`
 8. Add CF Tunnel ingress rule pointing to the MCP port
-9. Pass `ACL_YAML_CONTENT` build arg in Woodpecker pipeline (from `acl_yaml` secret)
+9. Pass `AUTH_YAML_CONTENT` build arg in Woodpecker pipeline (from `auth_yaml` secret)
 10. Register service in portal `MCP_SERVICES` for key creation
 
 ### Secrets pattern:
@@ -109,7 +109,7 @@ env/acl.yaml (source of truth, gitignored)
 │  POST /keys/validate     │  {key} → {valid, email, service, credentials}
 │  POST /credentials       │  store per-user credentials
 │  GET  /credentials       │  retrieve per-user credentials
-│  KV: ACL_CREDENTIALS     │  per-user credential storage
+│  KV: AUTH_CREDENTIALS     │  per-user credential storage
 │  KV: MCP_KEYS            │  shared MCP API key validation
 └──────────┬───────────────┘
      ┌─────┴─────┐
@@ -120,9 +120,9 @@ env/acl.yaml (source of truth, gitignored)
 ### How it works
 - **Policy source of truth**: `env/acl.yaml` (gitignored) defines users, groups, domains, and per-service tool-level ACL. Parsed at build time and baked into the worker bundle — no DB needed.
 - **Policy updates**: Edit `env/acl.yaml` → redeploy the ACL worker. Woodpecker CI injects the YAML from a secret.
-- **Enforcement**: `cassandra-mcp-auth` wraps all registered MCP tools with ACL checks when `ACL_URL` is set. Denied tools return an error message. Fails open if ACL service is unreachable.
+- **Enforcement**: `cassandra-mcp-auth` wraps all registered MCP tools with ACL checks when `AUTH_URL` is set. Denied tools return an error message. Fails open if ACL service is unreachable.
 - **Per-user credentials**: Stored in ACL KV keyed by `cred:{email}:{service}`. Portal syncs on credential save. MCP workers fetch at init via `cassandra-mcp-auth`.
-- **Auth**: Shared secret (`X-ACL-Secret` header) for worker-to-worker calls. CF Access service token (`CF-Access-Client-Id` header) for external callers through Cloudflare.
+- **Auth**: Shared secret (`X-Auth-Secret` header) for worker-to-worker calls. CF Access service token (`CF-Access-Client-Id` header) for external callers through Cloudflare.
 
 ### ACL YAML shape (`env/acl.yaml`)
 - `users.{email}.role: admin` → full wildcard access
@@ -133,14 +133,14 @@ env/acl.yaml (source of truth, gitignored)
 
 ### Deploying ACL service
 1. `tofu apply` in `cassandra-infra/` to create KV + DNS
-2. Set wrangler secrets: `ACL_SECRET`, `VM_PUSH_URL`, `VM_PUSH_CLIENT_ID`, `VM_PUSH_CLIENT_SECRET`
+2. Set wrangler secrets: `AUTH_SECRET`, `VM_PUSH_URL`, `VM_PUSH_CLIENT_ID`, `VM_PUSH_CLIENT_SECRET`
 3. Push to main — Woodpecker deploys automatically (injects `acl.yaml` from secret)
-4. Set `ACL_URL` and `ACL_SECRET` as wrangler secrets on each MCP worker + portal
+4. Set `AUTH_URL` and `AUTH_SECRET` as wrangler secrets on each MCP worker + portal
 
 ### Adding ACL for a new MCP service
 1. Add group/user policies for the service in `env/acl.yaml`
 2. Redeploy the ACL worker (push or manual `wrangler deploy`)
-3. Set `ACL_URL` + `ACL_SECRET` wrangler secrets on the new worker
+3. Set `AUTH_URL` + `AUTH_SECRET` wrangler secrets on the new worker
 4. Per-user credentials: set via portal or directly via ACL `/credentials/:email/:service` endpoint
 
 ## Observability
