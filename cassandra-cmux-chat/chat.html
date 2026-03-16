@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cmux Chat</title>
+<link rel="stylesheet" href="chat.css">
+<script src="vendor/marked.min.js"></script>
+</head>
+<body>
+
+<div class="status-bar">
+  <div id="status-dot" class="status-dot disconnected"></div>
+  <span id="status-text" class="status-text">disconnected</span>
+  <button id="new-chat-btn" class="new-chat-btn" title="New Chat">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+    </svg>
+  </button>
+  <span id="status-tokens" class="status-tokens"></span>
+</div>
+
+<div id="messages" class="messages"></div>
+
+<div class="input-container">
+  <div class="input-wrapper">
+    <textarea id="input-field" class="input-field" placeholder="Ask anything..."></textarea>
+    <div class="input-toolbar">
+      <div class="input-toolbar-left">
+        <div class="model-selector">
+          <button id="model-btn" class="model-btn">Sonnet</button>
+          <div id="model-dropdown" class="model-dropdown"></div>
+        </div>
+        <button id="thinking-btn" class="thinking-btn active" title="Thinking: On">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+            <path d="M12 2a7 7 0 0 0-4 12.7V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.3A7 7 0 0 0 12 2z"/>
+            <line x1="9" y1="21" x2="15" y2="21"/>
+          </svg>
+          <span>Thinking</span>
+        </button>
+      </div>
+      <div class="input-toolbar-right">
+        <button id="send-btn" class="send-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="chat.js"></script>
+
+<!-- Mock data for standalone testing -->
+<script>
+(function() {
+  // Only run mock when not in WKWebView
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cmux) return;
+
+  // Simulate connection
+  window.cmux.setStatus('connected');
+
+  // Simulate a full conversation
+  const events = [
+    // User message (rendered directly by sendMessage, but we can simulate the assistant side)
+    // Simulate user sending a message
+    () => {
+      const msgEl = document.createElement('div');
+      msgEl.className = 'msg msg-user';
+      msgEl.textContent = 'add a health check endpoint to the orchestrator that returns pod count and memory usage';
+      document.getElementById('messages').appendChild(msgEl);
+    },
+
+    // Assistant thinking
+    () => window.cmux.pushEvent({ type: 'status', status: 'busy' }),
+    () => window.cmux.pushEvent({ type: 'thinking_delta', content: 'The user wants a health check endpoint ' }),
+    () => window.cmux.pushEvent({ type: 'thinking_delta', content: 'on the orchestrator. Let me look at the ' }),
+    () => window.cmux.pushEvent({ type: 'thinking_delta', content: 'existing route structure and see how the Express app is set up.' }),
+
+    // Tool: Read
+    () => window.cmux.pushEvent({
+      type: 'tool_use', id: 'tool_1', name: 'Read',
+      input: { file_path: 'src/orchestrator/routes.ts' }
+    }),
+    () => window.cmux.pushEvent({
+      type: 'tool_result', id: 'tool_1',
+      content: "import { Router } from 'express';\nimport { SessionManager } from './session-manager';\n\nexport function createRoutes(mgr: SessionManager) {\n  const router = Router();",
+      isError: false
+    }),
+
+    // Tool: Grep
+    () => window.cmux.pushEvent({
+      type: 'tool_use', id: 'tool_2', name: 'Grep',
+      input: { pattern: 'health|readiness|liveness', path: 'src/' }
+    }),
+    () => window.cmux.pushEvent({
+      type: 'tool_result', id: 'tool_2', content: 'No matches found', isError: false
+    }),
+
+    // Text
+    () => window.cmux.pushEvent({
+      type: 'text', content: 'No health endpoint exists yet. I\'ll add one to `routes.ts`.'
+    }),
+
+    // Tool: Edit
+    () => window.cmux.pushEvent({
+      type: 'tool_use', id: 'tool_3', name: 'Edit',
+      input: {
+        file_path: 'src/orchestrator/routes.ts',
+        old_string: '  const router = Router();',
+        new_string: '  const router = Router();\n  router.get(\'/health\', async (_req, res) => {\n    const mem = process.memoryUsage();\n    const pods = await mgr.getActivePodCount();\n    res.json({ status: \'ok\', pods, memory: {\n      rss: Math.round(mem.rss / 1024 / 1024),\n      heap: Math.round(mem.heapUsed / 1024 / 1024),\n    }});\n  });'
+      }
+    }),
+    () => window.cmux.pushEvent({ type: 'tool_result', id: 'tool_3', content: 'Edit applied', isError: false }),
+
+    // Tool: Bash
+    () => window.cmux.pushEvent({
+      type: 'tool_use', id: 'tool_4', name: 'Bash',
+      input: { command: 'npm run typecheck' }
+    }),
+    () => window.cmux.pushEvent({
+      type: 'tool_result', id: 'tool_4', content: '\u2713 No type errors found', isError: false
+    }),
+
+    // Permission request
+    () => window.cmux.pushEvent({
+      type: 'permission_request', toolName: 'Bash', toolUseId: 'perm_1',
+      input: { command: 'kubectl rollout restart deployment/orchestrator -n claude-runner' }
+    }),
+
+    // Final text
+    () => window.cmux.pushEvent({
+      type: 'text', content: 'Added `GET /health`. Typecheck passes.'
+    }),
+
+    // Done
+    () => window.cmux.pushEvent({ type: 'done' }),
+
+    // Second turn — streaming text
+    () => {
+      const msgEl = document.createElement('div');
+      msgEl.className = 'msg msg-user';
+      msgEl.textContent = 'now add /ready with db check';
+      document.getElementById('messages').appendChild(msgEl);
+    },
+    () => window.cmux.pushEvent({ type: 'status', status: 'busy' }),
+    () => window.cmux.pushEvent({ type: 'thinking_delta', content: 'I\'ll add a readiness endpoint...' }),
+    () => window.cmux.pushEvent({ type: 'text_delta', content: 'I\'ll add a ' }),
+    () => window.cmux.pushEvent({ type: 'text_delta', content: '`/ready` endpoint ' }),
+    () => window.cmux.pushEvent({ type: 'text_delta', content: 'that pings the database' }),
+  ];
+
+  // Play events with delays
+  let delay = 100;
+  events.forEach((fn, i) => {
+    setTimeout(fn, delay);
+    delay += 150 + Math.random() * 100;
+  });
+})();
+</script>
+
+</body>
+</html>
