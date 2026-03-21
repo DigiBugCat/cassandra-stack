@@ -23,15 +23,13 @@ func main() {
 	listFlag := flag.Bool("list", false, "List sessions and exit")
 	printFlag := flag.Bool("print", false, "Print mode: send prompt from args and exit (like claude -p)")
 	pFlag := flag.Bool("p", false, "Print mode (short)")
-	attachFlag := flag.Bool("attach", false, "Attach to a session's PTY (native Claude Code TUI)")
-
+	newFlag := flag.Bool("new", false, "Create a new session and attach")
+	legacyTuiFlag := flag.Bool("legacy-tui", false, "Use the old Bubble Tea TUI instead of PTY attach")
 
 	flag.Parse()
 
-	// Load config from ~/.cmux/agent.json
 	cfg := LoadConfig()
 
-	// CLI flags override config
 	if *urlFlag != "" {
 		cfg.RunnerURL = *urlFlag
 	}
@@ -60,7 +58,7 @@ func main() {
 	initDebug()
 	debugLog("config: url=%s model=%s vault=%s", cfg.RunnerURL, cfg.Model, cfg.VaultName)
 
-	// Handle --list
+	// --list: print sessions and exit
 	if *listFlag {
 		rest := client.NewRestClient(cfg.RunnerURL, cfg.APIKey)
 		sessions, err := rest.ListSessions()
@@ -82,39 +80,10 @@ func main() {
 		return
 	}
 
-	// Handle --continue / -c: find most recent session
-	if (*continueFlag || *cFlag) && *sessionFlag == "" {
-		rest := client.NewRestClient(cfg.RunnerURL, cfg.APIKey)
-		sessions, err := rest.ListSessions()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error listing sessions: %v\n", err)
-			os.Exit(1)
-		}
-		if len(sessions) > 0 {
-			*sessionFlag = sessions[0].SessionID
-			fmt.Fprintf(os.Stderr, "Continuing session %s\n", *sessionFlag)
-		}
-	}
-
-	// Handle --attach: connect to PTY bridge for native Claude Code TUI
-	if *attachFlag {
-		if *sessionFlag == "" {
-			fmt.Fprintln(os.Stderr, "Error: --session is required with --attach")
-			os.Exit(1)
-		}
-		wsURL := strings.Replace(strings.Replace(cfg.RunnerURL, "https://", "wss://", 1), "http://", "ws://", 1)
-		if err := tui.RunPtyAttach(wsURL, cfg.APIKey, *sessionFlag); err != nil {
-			fmt.Fprintf(os.Stderr, "\r\nError: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
-	// Handle --print / -p mode: send remaining args as prompt, print result, exit
+	// --print / -p: send prompt and exit
 	if *printFlag || *pFlag {
 		prompt := strings.Join(flag.Args(), " ")
 		if prompt == "" {
-			// Read from stdin
 			scanner := bufio.NewScanner(os.Stdin)
 			var lines []string
 			for scanner.Scan() {
@@ -133,23 +102,65 @@ func main() {
 		return
 	}
 
-	// TUI is the only interactive mode
-	appCfg := tui.AppConfig{
-		RunnerURL:     cfg.RunnerURL,
-		APIKey:        cfg.APIKey,
-		Model:         cfg.Model,
-		Thinking:      cfg.Thinking,
-		SessionID:     *sessionFlag,
-		Vault:         cfg.VaultName,
-		PermMode:      cfg.PermissionMode,
-		SysPrompt:     cfg.SystemPrompt,
-		CompactInstr:  cfg.CompactInstructions,
-		AgentName:     cfg.AgentName,
-		InitialPrompt: strings.Join(flag.Args(), " "),
+	// --legacy-tui: use the old Bubble Tea TUI
+	if *legacyTuiFlag {
+		appCfg := tui.AppConfig{
+			RunnerURL:     cfg.RunnerURL,
+			APIKey:        cfg.APIKey,
+			Model:         cfg.Model,
+			Thinking:      cfg.Thinking,
+			SessionID:     *sessionFlag,
+			Vault:         cfg.VaultName,
+			PermMode:      cfg.PermissionMode,
+			SysPrompt:     cfg.SystemPrompt,
+			CompactInstr:  cfg.CompactInstructions,
+			AgentName:     cfg.AgentName,
+			InitialPrompt: strings.Join(flag.Args(), " "),
+		}
+		if err := tui.RunProgram(appCfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
-	if err := tui.RunProgram(appCfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	// Default: PTY attach mode
+	// Resolve session ID: --session, --continue/-c, --new, or pick from list
+	rest := client.NewRestClient(cfg.RunnerURL, cfg.APIKey)
+	sessionID := *sessionFlag
+
+	if (*continueFlag || *cFlag) && sessionID == "" {
+		sessions, err := rest.ListSessions()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error listing sessions: %v\n", err)
+			os.Exit(1)
+		}
+		if len(sessions) > 0 {
+			sessionID = sessions[0].SessionID
+			fmt.Fprintf(os.Stderr, "Continuing session %s\n", sessionID)
+		}
+	}
+
+	if *newFlag || sessionID == "" {
+		// Create a new session
+		fmt.Fprintf(os.Stderr, "Creating new session...")
+		req := client.SessionRequest{
+			Model: cfg.Model,
+			Vault: cfg.VaultName,
+		}
+		resp, err := rest.CreateSession(req)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\rError creating session: %v\n", err)
+			os.Exit(1)
+		}
+		sessionID = resp.SessionID
+		fmt.Fprintf(os.Stderr, "\rSession %s created. Attaching...\n", sessionID[:8])
+	}
+
+	// Attach to the PTY
+	wsURL := strings.Replace(strings.Replace(cfg.RunnerURL, "https://", "wss://", 1), "http://", "ws://", 1)
+	if err := tui.RunPtyAttach(wsURL, cfg.APIKey, sessionID); err != nil {
+		fmt.Fprintf(os.Stderr, "\r\nError: %v\n", err)
 		os.Exit(1)
 	}
 }
