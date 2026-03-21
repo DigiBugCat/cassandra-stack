@@ -30,3 +30,7 @@
 	path = cassandra-auth
 	url = https://github.com/DigiBugCat/cassandra-auth.git
 	branch = main
+[submodule "cassandra-fmp"]
+	path = cassandra-fmp
+	url = https://github.com/DigiBugCat/cassandra-fmp.git
+	branch = main
