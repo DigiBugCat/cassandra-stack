@@ -367,7 +367,7 @@ Create `.woodpecker.yaml` in your repo root. Copy from `cassandra-portal/.woodpe
   commands:
     - >
       buildctl
-      --addr tcp://buildkitd.buildkitd.svc.cluster.local:1234
+      --addr tcp://buildkitd.infra.svc.cluster.local:1234
       build
       --frontend dockerfile.v0
       --local context=backend
@@ -769,7 +769,7 @@ Each service ships its own Terraform modules in `infra/modules/` rather than sha
 Speed. Images stay on-cluster, no egress costs, no rate limits. The tradeoff is manual insecure-registry config on all nodes.
 
 ### Why BuildKit instead of docker build?
-Kaniko was archived June 2025. BuildKit runs as a persistent Deployment on pantainos with cache on `/scratch`, making source-only rebuilds near-instant. Woodpecker steps use `moby/buildkit:v0.21.1` with `buildctl --addr tcp://buildkitd.buildkitd.svc.cluster.local:1234`.
+Kaniko was archived June 2025. BuildKit runs as a persistent Deployment on pantainos with cache on `/scratch`, making source-only rebuilds near-instant. Woodpecker steps use `moby/buildkit:v0.21.1` with `buildctl --addr tcp://buildkitd.infra.svc.cluster.local:1234`.
 
 ### Why Recreate instead of RollingUpdate?
 For GPU workloads and singleton services with PVCs. Can't have two pods fighting over the same GPU or volume. For stateless CPU services, `RollingUpdate` is fine.
