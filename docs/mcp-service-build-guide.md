@@ -37,7 +37,7 @@ Backend (same pod)
 
 ## Repo Structure
 
-Each MCP service lives in its own repo (`DigiBugCat/cassandra-<name>`) and is a submodule of `cassandra-stack`:
+Each MCP service lives in its own repo (`Cassandras-Edge/cassandra-<name>`) and is a submodule of `cassandra-stack`:
 
 ```
 cassandra-<service>/
@@ -68,17 +68,17 @@ cassandra-<service>/
 ### 1. Create the repo
 
 ```bash
-# Create repo under DigiBugCat org
-gh repo create DigiBugCat/cassandra-<service> --public
+# Create repo under Cassandras-Edge org
+gh repo create Cassandras-Edge/cassandra-<service> --public
 
 # Add as submodule in cassandra-stack
 cd ~/cassandra-stack
-git submodule add https://github.com/DigiBugCat/cassandra-<service>.git
+git submodule add https://github.com/Cassandras-Edge/cassandra-<service>.git
 ```
 
 ### 2. Worker (MCP Gateway)
 
-Use the `cassandra-mcp-auth` shared package (`github:DigiBugCat/cassandra-auth`). This provides WorkOS OAuth, MCP API key resolution (with per-key credentials), and metrics middleware via a single `createMcpWorker()` factory.
+Use the `cassandra-mcp-auth` shared package (`github:Cassandras-Edge/cassandra-auth`). This provides WorkOS OAuth, MCP API key resolution (with per-key credentials), and metrics middleware via a single `createMcpWorker()` factory.
 
 **No more copying auth boilerplate.** Your worker only needs:
 
@@ -201,7 +201,7 @@ The package root intentionally centers `createMcpWorker()`. If a service needs l
 ```json
 {
   "dependencies": {
-    "cassandra-mcp-auth": "github:DigiBugCat/cassandra-auth",
+    "cassandra-mcp-auth": "github:Cassandras-Edge/cassandra-auth",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -326,7 +326,7 @@ metadata:
   namespace: argocd
 spec:
   source:
-    repoURL: https://github.com/DigiBugCat/cassandra-k8s.git
+    repoURL: https://github.com/Cassandras-Edge/cassandra-k8s.git
     path: apps/cassandra-<service>
     helm:
       valueFiles: [values.yaml]
@@ -643,7 +643,7 @@ function emit(level: string, scope: string, message: string, meta?: Record<strin
 
 #### Grafana Dashboards
 
-Dashboards live in the `cassandra-observability` repo (`DigiBugCat/cassandra-observability`), not in `cassandra-k8s`. ArgoCD app `observability-dashboards` watches the `dashboards/` directory and syncs ConfigMaps to the `monitoring` namespace.
+Dashboards live in the `cassandra-observability` repo (`Cassandras-Edge/cassandra-observability`), not in `cassandra-k8s`. ArgoCD app `observability-dashboards` watches the `dashboards/` directory and syncs ConfigMaps to the `monitoring` namespace.
 
 To add a dashboard for your service:
 1. Create `dashboards/<service>.json` in `cassandra-observability`

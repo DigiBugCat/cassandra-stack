@@ -4,19 +4,19 @@
 	branch = main
 [submodule "cassandra-k8s"]
 	path = cassandra-k8s
-	url = https://github.com/DigiBugCat/cassandra-k8s.git
+	url = https://github.com/Cassandras-Edge/cassandra-k8s.git
 	branch = main
 [submodule "cassandra-observability"]
 	path = cassandra-observability
-	url = https://github.com/DigiBugCat/cassandra-observability.git
+	url = https://github.com/Cassandras-Edge/cassandra-observability.git
 	branch = main
 [submodule "cassandra-obsidian"]
 	path = cassandra-obsidian
-	url = https://github.com/DigiBugCat/cassandra-obsidian.git
+	url = https://github.com/Cassandras-Edge/cassandra-obsidian.git
 	branch = main
 [submodule "cassandra-portal"]
 	path = cassandra-portal
-	url = https://github.com/DigiBugCat/cassandra-portal.git
+	url = https://github.com/Cassandras-Edge/cassandra-portal.git
 	branch = main
 [submodule "cassandra-yt-mcp"]
 	path = cassandra-yt-mcp
@@ -24,13 +24,13 @@
 	branch = main
 [submodule "claude-agent-runner"]
 	path = claude-agent-runner
-	url = https://github.com/DigiBugCat/claude-agent-runner.git
+	url = https://github.com/Cassandras-Edge/claude-agent-runner.git
 	branch = main
 [submodule "cassandra-auth"]
 	path = cassandra-auth
-	url = https://github.com/DigiBugCat/cassandra-auth.git
+	url = https://github.com/Cassandras-Edge/cassandra-auth.git
 	branch = main
 [submodule "cassandra-fmp"]
 	path = cassandra-fmp
-	url = https://github.com/DigiBugCat/cassandra-fmp.git
+	url = https://github.com/Cassandras-Edge/cassandra-fmp.git
 	branch = main
