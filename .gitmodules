@@ -1,6 +1,6 @@
 [submodule "cassandra-infra"]
 	path = cassandra-infra
-	url = https://github.com/DigiBugCat/cassandra-infra.git
+	url = https://github.com/Cassandras-Edge/cassandra-infra.git
 	branch = main
 [submodule "cassandra-k8s"]
 	path = cassandra-k8s
@@ -20,7 +20,7 @@
 	branch = main
 [submodule "cassandra-yt-mcp"]
 	path = cassandra-yt-mcp
-	url = https://github.com/DigiBugCat/cassandra-yt-mcp.git
+	url = https://github.com/Cassandras-Edge/cassandra-yt-mcp.git
 	branch = main
 [submodule "claude-agent-runner"]
 	path = claude-agent-runner
