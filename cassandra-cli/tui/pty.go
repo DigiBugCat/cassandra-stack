@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"golang.org/x/sys/unix"
@@ -47,13 +48,19 @@ func RunPtyAttach(orchestratorURL, apiKey, sessionID string) error {
 	cols, rows := getTermSize(fd)
 	sendResize(conn, cols, rows)
 
-	// Handle SIGWINCH (terminal resize)
+	// Handle SIGWINCH (terminal resize) with debounce to avoid resize storms
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
 	go func() {
+		var timer *time.Timer
 		for range sigCh {
-			c, r := getTermSize(fd)
-			sendResize(conn, c, r)
+			if timer != nil {
+				timer.Stop()
+			}
+			timer = time.AfterFunc(150*time.Millisecond, func() {
+				c, r := getTermSize(fd)
+				sendResize(conn, c, r)
+			})
 		}
 	}()
 	defer signal.Stop(sigCh)
@@ -65,7 +72,12 @@ func RunPtyAttach(orchestratorURL, apiKey, sessionID string) error {
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
-				errCh <- fmt.Errorf("ws read: %w", err)
+				// Normal closure when session ends — not an error
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
+					errCh <- nil
+				} else {
+					errCh <- fmt.Errorf("ws read: %w", err)
+				}
 				return
 			}
 
